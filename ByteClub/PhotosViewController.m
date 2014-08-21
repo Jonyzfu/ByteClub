@@ -62,6 +62,43 @@
 
 - (void)refreshPhotos
 {
+    [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:YES];
+    NSString *photoDir = [NSString stringWithFormat:@"https://api.dropbox.com/1/search/dropbox/%@/photos?query=.jpg", appFolder];
+    NSURL *url = [NSURL URLWithString:photoDir];
+    
+    [[_session dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (!error) {
+            NSHTTPURLResponse *httpResp = (NSHTTPURLResponse *)response;
+            if (httpResp.statusCode == 200) {
+                NSError *jsonError;
+                NSArray *fileJSON = [NSJSONSerialization JSONObjectWithData:data
+                                                                    options:NSJSONReadingAllowFragments
+                                                                      error:&jsonError];
+                NSMutableArray *dbFiles = [[NSMutableArray alloc] init];
+                if (!jsonError) {
+                    for (NSDictionary *fileMetadata in fileJSON) {
+                        DBFile *file = [[DBFile alloc] initWithJSONData:fileMetadata];
+                        [dbFiles addObject:file];
+                    }
+                    
+                    [dbFiles sortUsingComparator:^NSComparisonResult(id obj1, id obj2) {
+                        return [obj1 compare:obj2];
+                    }];
+                    
+                    _photoThumbnails = dbFiles;
+                    
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:NO];
+                        [self.tableView reloadData];
+                        });
+                }
+            } else {
+                // HANDLE BAD RESPONSE
+            }
+        } else {
+            // HANDLE ERRORS
+        }
+    }] resume];
 
 }
 
@@ -111,8 +148,20 @@
                 NSLog(@"logging this url so no warning in starter project %@",url);
                 
                 // GO GET THUMBNAILS //
-                
-                
+                [UIApplication sharedApplication].networkActivityIndicatorVisible = YES;
+                NSURLSessionDataTask *dataTask = [_session dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                    if (!error) {
+                        UIImage *image = [[UIImage alloc] initWithData:data];
+                        photo.thumbNail = image;
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
+                            cell.thumbnailImage.image = photo.thumbNail;
+                        });
+                    } else {
+                        // HANDLE ERROR
+                    }
+                }];
+                [dataTask resume];
                 
             }
         }
