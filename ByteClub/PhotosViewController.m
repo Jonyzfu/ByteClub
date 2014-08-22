@@ -11,7 +11,7 @@
 #import "Dropbox.h"
 #import "DBFile.h"
 
-@interface PhotosViewController ()<UITableViewDelegate,UITableViewDataSource,UIImagePickerControllerDelegate,UINavigationControllerDelegate>
+@interface PhotosViewController ()<UITableViewDelegate,UITableViewDataSource,UIImagePickerControllerDelegate,UINavigationControllerDelegate, NSURLSessionTaskDelegate>
 
 @property (weak, nonatomic) IBOutlet UIProgressView *progress;
 @property (weak, nonatomic) IBOutlet UIView *uploadView;
@@ -22,7 +22,7 @@
 
 @property (nonatomic, strong) NSURLSession *session;
 
-
+@property (nonatomic, strong) NSURLSessionTask *uploadTask;
 
 @end
 
@@ -195,12 +195,65 @@
 // stop upload
 - (IBAction)cancelUpload:(id)sender
 {
-    
+    if (_uploadTask.state == NSURLSessionTaskStateRunning) {
+        [_uploadTask cancel];
+    }
 }
 
 - (void)uploadImage:(UIImage*)image
 {
+    NSData *imageData = UIImageJPEGRepresentation(image, 0.6);
+    
+    // Using an NSURLSessionConfiguration that only permits one connection to the remote host
+    NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+    config.HTTPMaximumConnectionsPerHost = 1;
+    [config setHTTPAdditionalHeaders:@{@"Authorization": [Dropbox apiAuthorizationHeader]}];
+    
+    // The upload and download tasks report information back to their delegates;
+    NSURLSession *uploadSession = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];
+    // create a random file name
+    NSURL *url = [Dropbox createPhotoUploadURL];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
+    [request setHTTPMethod:@"PUT"];
+    
+    // Set the uploadTask property using JPEG image obtained from the UIImagePicker
+    self.uploadTask = [uploadSession uploadTaskWithRequest:request fromData:imageData];
+    
+    // Display the UIProgressView hidden inside of PhotosViewController
+    self.uploadView.hidden = NO;
+    [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:YES];
+    
+    [_uploadTask resume];
   
+}
+
+#pragma mark - NSURLSessionTaskDelegate methods
+
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
+   didSendBodyData:(int64_t)bytesSent totalBytesSent:(int64_t)totalBytesSent
+totalBytesExpectedToSend:(int64_t)totalBytesExpectedToSend {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [_progress setProgress:(double)totalBytesSent / (double)totalBytesExpectedToSend animated:YES];
+    });
+}
+
+// indicate when the upload is complete
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+    // Turn off the network activity indicator and then hides the _uploadView as a bit of cleanup once the upload is done
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[UIApplication sharedApplication] setNetworkActivityIndicatorVisible:NO];
+        _uploadView.hidden = YES;
+        [_progress setProgress:0.5];
+    });
+    
+    if (!error) {
+        // In real world app, you should probably be storing or caching the images locally
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refreshPhotos];
+        });
+    } else {
+        // Alert the error
+    }
 }
 
 
